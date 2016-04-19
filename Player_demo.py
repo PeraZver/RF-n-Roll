@@ -6,25 +6,71 @@ import MFRC522
 import signal
 from pygame import mixer
 from pygame import mixer_music as player
+import os
 
 
-continue_reading = True
+class Playlist:
+    """ A Class that creates a playlist of songs based on the scanned code. It also updates the current song
+    to be played. """
+    # Set the playlist directories, common for all classes, song counter and song.
+    path = '/home/pi/Documents/Music/'
+    song_counter = 0
+    song = ''
+    folder = ''
+    filename = ''
+    
+    def __init__ (self, name):
+        self.name = name
+            
 
-# Set the playlist directories
-path = '/home/pi/Documents/Music/Florence_And_The_Machine-Between_Two_Lungs/'
-#song = '101-florence_and_the_machine-dog_days_are_over-caheso.mp3'
-song_list = open("song_list.dat").read().split("\n")   # Import all song titles from the datafile, and make a python list out of them
-song_list.pop()
-song = song_list[0]
+    def createPlaylist(self, code):
+        """ Creates playlist based on the code from the RFID tag. Returns a list of all songs
+        in a given directory. Everytime the playlist is created the self.song becomes first song
+        on that playlist. """
+        self.folder = self.songCode(code)
+        self.playlist = os.listdir(self.path + self.folder)   # Read all files from the Music directory and keep only mp3s
+        for item in self.playlist:
+            if item[-1] != '3':
+                self.playlist.remove(item)
+                
+        self.playlist.sort()
+        self.song_counter = 0
+        self.song = self.playlist[0]
+        self.filename = self.path + self.folder + self.song
+
+
+    def songCode(self, code):
+        """ A function that assigns a music directories to the code from RFID tag.
+        The directories are coded elegantly in form of a dictionary. Better solution
+        will be with if/elif/else control. """
+        return {
+               '93' : 'Florence_And_The_Machine-Between_Two_Lungs/',
+               '182': 'Florence_And_The_Machine-Between_Two_Lungs/',
+               '99' : 'Florence_And_The_Machine-Between_Two_Lungs/',
+               }[code]
+    
+    def updateSong(self):
+        """ Updates the current playing song within the playlist. """
+        self.song_counter += 1
+        if self.song_counter > len(self.playlist):  # If it comes till the end of the playlist, restart it.
+            self.song_counter = 0
+        self.song = self.playlist[self.song_counter]
+        self.filename = self.path + self.folder + self.song
+
+
+MyPlaylist = Playlist("Test Playlist")
 
 song_started = False    # Flags to see the state of the player
 song_paused = False
 last_card = '0'         # Flag that remembers last card
+continue_reading = True
+number_of_no_detects = 0
+
 
 # Function for playing some music
 def playMusic():
     """ A function that plays music. It loads the song from the playlist and plays it. """
-    player.load(path + song)
+    player.load(MyPlaylist.filename)
     player.play()
 
 def pauseMusic():
@@ -47,24 +93,17 @@ def isAlreadyScanned(code):
 
 def updatePlaylist(code):
     """ A function to update current playlist. """
-    global song
-    global last_card, song_started
+    global last_card, song_started, Playlist
     last_card = code
     song_started = False   # if new card is scanned, stop current song
     stopMusic()
-    song = songCode(code)
+    MyPlaylist.createPlaylist(code)
 
+def nextSong():
+    """ A function that updates songs to be played in the class playlist. """
+    MyPlaylist.updateSong()
+    
 
-def songCode(code):
-    """ A function that assigns a song playlist to the code from RFID tag.
-        The songs are assigned elegantly in form of a dictionary. Better solution
-        will be with if/elif/else control. """
-    return {
-           '93' : song_list[0],
-           '182': song_list[1],
-           '99' : song_list[2],
-           }[code]
-        
 
 # Capture SIGINT for cleanup when the script is aborted
 def end_read(signal,frame):
@@ -104,14 +143,14 @@ while continue_reading:
        # Print UID
         print "Card read UID: "+str(uid[0])+","+str(uid[1])+","+str(uid[2])+","+str(uid[3])
         if not isAlreadyScanned(str(uid[0])):    # Check if this card was scanned earlier 
-            updatePlaylist(str(uid[0]))          # if not, then pick a song
+            updatePlaylist(str(uid[0]))          # if not, then make a playlist
             print uid[0], last_card
             
         if not song_started:     # Now check if something's playing already      
                 playMusic()      # If not, start it
                 song_started = True
                 song_paused = False
-                print 'Sviramo pjesmu ' + song
+                print "We're playing  " + MyPlaylist.song
 
                                  
         elif song_paused:           # If we're playing, check if we paused it then unpause it
@@ -124,14 +163,18 @@ while continue_reading:
 
             
     elif status != MIFAREReader.MI_OK and song_started and not song_paused:     # If we don't get any card read, and song is started but unpaused --> pause the song
-        song_paused = True
-        print 'Pauziramo pjesmu!'
-        pauseMusic()
-    else:
-        continue
+        number_of_no_detects += 1
+        if number_of_no_detects > 2:
+            number_of_no_detects = 0
+            song_paused = True
+            print 'Pauziramo pjesmu!'
+            pauseMusic()
+        else:
+            continue
             
-    if song_started and not player.get_busy():
-        print "Song not playing ..."
+    if song_started and not player.get_busy():      # If the song has come to the end, read new song and rise the flag to play the new one.
+        print "Song finished !"
+        nextSong()
         song_started = False
             
 
